@@ -111,6 +111,47 @@ class ConfigurationManager:
                 f"Configuration key '{key}' not found in section '[{section}]'"
             )
 
+    def _get_float_value(
+        self, section: str, key: str, min_val: float = None, max_val: float = None
+    ) -> float:
+        """
+        Get float value with validation.
+
+        Args:
+            section: Configuration section name
+            key: Configuration key
+            min_val: Minimum allowed value (optional)
+            max_val: Maximum allowed value (optional)
+
+        Returns:
+            Validated float value
+
+        Raises:
+            ConfigurationError: If value is invalid or out of range
+        """
+        try:
+            value = self.config.getfloat(section, key)
+            if min_val is not None and value < min_val:
+                raise ConfigurationError(
+                    f"{section}.{key} must be >= {min_val}, got {value}"
+                )
+            if max_val is not None and value > max_val:
+                raise ConfigurationError(
+                    f"{section}.{key} must be <= {max_val}, got {value}"
+                )
+            return value
+        except ValueError:
+            raw_value = self.config.get(section, key, fallback="<missing>")
+            raise ConfigurationError(
+                f"{section}.{key} must be a float, got '{raw_value}'"
+            )
+        except configparser.NoSectionError:
+            raise ConfigurationError(f"Configuration section '[{section}]' not found")
+        except configparser.NoOptionError:
+            raise ConfigurationError(
+                f"Configuration key '{key}' not found in section '[{section}]'"
+            )
+
     def get_general_config(self) -> Dict[str, str]:
         """
         Get general configuration parameters.
@@ -129,9 +170,30 @@ class ConfigurationManager:
                 "dataset_name": self._get_string_value(
                     "General", "dataset_name", ["MNIST", "CIFAR-10"]
                 ),
+                "batch_size": self._get_int_value("General", "batch_size", min_val=1),
             }
         except Exception as e:
             raise ConfigurationError(f"Error in General configuration: {str(e)}")
+
+    def get_training_config(self) -> Dict[str, Union[int, float]]:
+        """
+        Get training configuration parameters.
+
+        Returns:
+            Dictionary containing training parameters
+
+        Raises:
+            ConfigurationError: If required parameters are missing or invalid
+        """
+        try:
+            return {
+                "num_epochs": self._get_int_value("Training", "num_epochs", min_val=1),
+                "learning_rate": self._get_float_value(
+                    "Training", "learning_rate", min_val=0.0
+                ),
+            }
+        except Exception as e:
+            raise ConfigurationError(f"Error in Training configuration: {str(e)}")
 
     def get_image_patching_config(self) -> Dict[str, int]:
         """
@@ -253,6 +315,7 @@ class ConfigurationManager:
         try:
             # Validate all sections
             general_config = self.get_general_config()
+            self.get_training_config()
             self.get_image_patching_config()
             self.get_transformer_config()
 

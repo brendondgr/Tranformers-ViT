@@ -1,6 +1,14 @@
 # Custom
 .cursor/
 .kiro/
+data/
+reports/
+
+# UV
+.venv/
+pyproject.toml
+.python-version
+uv.lock
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

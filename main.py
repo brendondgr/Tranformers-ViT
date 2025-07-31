@@ -2,27 +2,48 @@ import logging
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import argparse
 from python.config_utils import ConfigurationManager, ConfigurationError
 from python.VITs import ViTStandard
 from python.dataset_utils import create_mnist_loaders, validate_mnist_compatibility
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TransformerExperiment:
-    def __init__(self, config_path='config.ini'):
+    def __init__(self, args):
         try:
             # Use ConfigurationManager for proper validation
-            self.config_manager = ConfigurationManager(config_path)
+            self.config_manager = ConfigurationManager(args.config_path)
             self.config_manager.validate_config()
-            
-            # Get general configuration
+
+            # Get configurations and apply overrides
             general_config = self.config_manager.get_general_config()
-            self.model_name = general_config['model_name']
-            self.dataset_name = general_config['dataset_name']
+            training_config = self.config_manager.get_training_config()
             
-            logging.info(f"Configuration loaded and validated from {config_path}")
-            logging.info(f"Model: {self.model_name}, Dataset: {self.dataset_name}")
+            self.model_name = args.model_name or general_config['model_name']
+            self.dataset_name = args.dataset_name or general_config['dataset_name']
+            self.batch_size = args.batch_size or general_config['batch_size']
+            self.num_epochs = args.num_epochs or training_config['num_epochs']
+            self.learning_rate = args.learning_rate or training_config['learning_rate']
+
+            # For model-specific parameters, we may need to update the config dynamically
+            if args.patch_size:
+                self.config_manager.config.set('ImagePatching', 'patch_size', str(args.patch_size))
+            if args.img_size:
+                self.config_manager.config.set('ImagePatching', 'img_size', str(args.img_size))
+            if args.in_channels:
+                self.config_manager.config.set('ImagePatching', 'in_channels', str(args.in_channels))
+            if args.num_layers:
+                self.config_manager.config.set('TransformerEncoder', 'num_layers', str(args.num_layers))
+            if args.embed_dim:
+                self.config_manager.config.set('TransformerEncoder', 'embed_dim', str(args.embed_dim))
+            if args.num_heads:
+                self.config_manager.config.set('TransformerEncoder', 'num_heads', str(args.num_heads))
+
+            logging.info(f"Configuration loaded and validated from {args.config_path}")
+            logging.info(f"Model: {self.model_name}, Dataset: {self.dataset_name}, Batch Size: {self.batch_size}")
             
         except ConfigurationError as e:
             logging.error(f"Configuration error: {str(e)}")
@@ -87,7 +108,7 @@ class TransformerExperiment:
                 train_loader, test_loader = create_mnist_loaders(
                     img_size=model_config['img_size'],
                     in_channels=model_config['in_channels'],
-                    batch_size=32,  # Default batch size, could be made configurable
+                    batch_size=self.batch_size,  # Use configurable batch size
                     num_workers=0,  # Default for compatibility
                     download=True,
                     data_root='./data'
@@ -142,7 +163,7 @@ class TransformerExperiment:
             logging.info("Starting training and evaluation...")
             
             # Train the model
-            trained_model = self.train_model(model, train_loader)
+            trained_model = self.train_model(model, train_loader, num_epochs=self.num_epochs, learning_rate=self.learning_rate)
             
             # Evaluate the model with basic metrics
             accuracy = self.evaluate_model(trained_model, test_loader)
@@ -176,6 +197,7 @@ class TransformerExperiment:
         try:
             # Set device (GPU if available, otherwise CPU)
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            device = torch.device('xpu' if (torch.xpu.is_available() and device != 'cuda') else 'cpu')
             model = model.to(device)
             logging.info(f"Training on device: {device}")
             
@@ -477,6 +499,9 @@ class TransformerExperiment:
             
             # Save report if requested
             if save_report:
+                reports_folder = "reports"
+                os.makedirs(reports_folder, exist_ok=True)
+                report_path = os.path.join(reports_folder, report_path)
                 with open(report_path, 'w') as f:
                     f.write(report)
                 logging.info(f"Evaluation report saved to {report_path}")
@@ -493,5 +518,27 @@ class TransformerExperiment:
 
 
 if __name__ == "__main__":
-    experiment = TransformerExperiment()
+    parser = argparse.ArgumentParser(description="Run Vision Transformer experiments.")
+    
+    # General configuration
+    parser.add_argument("--config_path", type=str, default="config.ini", help="Path to config file")
+    parser.add_argument("--model_name", type=str, help="Model to use (overrides config)")
+    parser.add_argument("--dataset_name", type=str, help="Dataset to use (overrides config)")
+    
+    # Training parameters
+    parser.add_argument("--batch_size", type=int, help="Batch size (overrides config)")
+    parser.add_argument("--num_epochs", type=int, help="Number of epochs (overrides config)")
+    parser.add_argument("--learning_rate", type=float, help="Learning rate (overrides config)")
+
+    # Model-specific parameters
+    parser.add_argument("--patch_size", type=int, help="Patch size for Vision Transformer (overrides config)")
+    parser.add_argument("--img_size", type=int, help="Input image size (overrides config)")
+    parser.add_argument("--in_channels", type=int, help="Number of input channels (overrides config)")
+    parser.add_argument("--num_layers", type=int, help="Number of transformer encoder layers (overrides config)")
+    parser.add_argument("--embed_dim", type=int, help="Dimension of the embedding space (overrides config)")
+    parser.add_argument("--num_heads", type=int, help="Number of attention heads (overrides config)")
+    
+    args = parser.parse_args()
+
+    experiment = TransformerExperiment(args)
     experiment.run()
